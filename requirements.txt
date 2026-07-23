@@ -1,0 +1,7 @@
+numpy
+librosa
+noisereduce
+tensorflow
+scikit-learn
+sounddevice
+scipy
