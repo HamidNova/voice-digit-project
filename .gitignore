@@ -1,4 +1,22 @@
+
+# IDE
 .idea/
+
+# Python cache
 __pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Trained models
 *.h5
-speech_digit_classifier.h5
+*.keras
+
+# Dataset
+dataset/
+
+# Generated files
+.DS_Store
+Thumbs.db
