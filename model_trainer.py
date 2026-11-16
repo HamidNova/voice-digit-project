@@ -4,27 +4,51 @@ import tensorflow as tf
 from tensorflow.keras import layers, models, callbacks
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
-from audio_processor import extract_audio_features, FEATURE_TIMESTEPS
+from audio_processor import extract_audio_features
+
 
 DATASET_DIRECTORY = "dataset"
 MODEL_SAVE_PATH = "speech_digit_classifier.h5"
+
 
 def build_dataset(dataset_path):
     features_list = []
     labels_list = []
 
-    if not os.path.exists(dataset_path):
-        raise FileNotFoundError(f"Dataset directory '{dataset_path}' not found.")
+    if not os.path.isdir(dataset_path):
+        raise FileNotFoundError(
+            f"Dataset directory '{dataset_path}' not found."
+        )
 
-    digit_folders = sorted([f for f in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, f))])
+    digit_folders = sorted(
+        folder for folder in os.listdir(dataset_path)
+        if os.path.isdir(os.path.join(dataset_path, folder))
+    )
+
+    if not digit_folders:
+        raise ValueError("No class folders found in the dataset.")
+
     print(f"Detected classes: {digit_folders}")
 
     for folder_name in digit_folders:
+        if not folder_name.isdigit():
+            print(f"Skipping invalid class folder: {folder_name}")
+            continue
+
         folder_path = os.path.join(dataset_path, folder_name)
-        file_names = [f for f in os.listdir(folder_path) if f.endswith('.wav')]
-        print(f"Processing class [{folder_name}] - Files: {len(file_names)}...")
+
+        file_names = sorted(
+            file_name for file_name in os.listdir(folder_path)
+            if file_name.lower().endswith(".wav")
+        )
+
+        print(
+            f"Processing class [{folder_name}] - "
+            f"Files: {len(file_names)}..."
+        )
 
         success_count = 0
+
         for file_name in file_names:
             file_path = os.path.join(folder_path, file_name)
             extracted_feat = extract_audio_features(file_path)
@@ -34,42 +58,82 @@ def build_dataset(dataset_path):
                 labels_list.append(int(folder_name))
                 success_count += 1
 
-        print(f"Loaded {success_count} files from class {folder_name}.")
+        print(
+            f"Loaded {success_count} files from class {folder_name}."
+        )
+
+    if not features_list:
+        raise ValueError("No valid audio features could be extracted.")
 
     return np.array(features_list), np.array(labels_list)
+
 
 def create_classifier(input_shape, num_classes=10):
     inputs = layers.Input(shape=input_shape)
 
-    x = layers.Conv1D(filters=64, kernel_size=3, padding='same', activation='relu')(inputs)
+    x = layers.Conv1D(
+        filters=64,
+        kernel_size=3,
+        padding="same",
+        activation="relu"
+    )(inputs)
+
     x = layers.BatchNormalization()(x)
     x = layers.MaxPooling1D(pool_size=2)(x)
     x = layers.Dropout(0.25)(x)
 
-    x = layers.Bidirectional(layers.GRU(64, return_sequences=True))(x)
-    x = layers.Dropout(0.3)(x)
-    x = layers.Bidirectional(layers.GRU(32))(x)
+    x = layers.Bidirectional(
+        layers.GRU(64, return_sequences=True)
+    )(x)
 
-    x = layers.Dense(64, activation='relu')(x)
     x = layers.Dropout(0.3)(x)
-    outputs = layers.Dense(num_classes, activation='softmax')(x)
 
-    model = models.Model(inputs=inputs, outputs=outputs, name="Speech_Digit_Model")
+    x = layers.Bidirectional(
+        layers.GRU(32)
+    )(x)
+
+    x = layers.Dense(64, activation="relu")(x)
+    x = layers.Dropout(0.3)(x)
+
+    outputs = layers.Dense(
+        num_classes,
+        activation="softmax"
+    )(x)
+
+    model = models.Model(
+        inputs=inputs,
+        outputs=outputs,
+        name="Speech_Digit_Model"
+    )
+
     return model
+
 
 if __name__ == "__main__":
     print("Loading dataset...")
+
     X, y = build_dataset(DATASET_DIRECTORY)
 
-    if len(X) == 0:
-        print("Error: No data loaded.")
-        exit()
+    if len(X) < 2:
+        raise ValueError("Not enough samples to train the model.")
 
     print(f"Features shape: {X.shape}")
     print(f"Labels shape: {y.shape}")
 
+    class_counts = np.unique(y, return_counts=True)[1]
+
+    if np.min(class_counts) < 2:
+        raise ValueError(
+            "Each class must contain at least 2 valid samples "
+            "for stratified train/test splitting."
+        )
+
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.20, random_state=42, stratify=y
+        X,
+        y,
+        test_size=0.20,
+        random_state=42,
+        stratify=y
     )
 
     input_dim = (X.shape[1], X.shape[2])
@@ -77,20 +141,31 @@ if __name__ == "__main__":
 
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-        loss='sparse_categorical_crossentropy',
-        metrics=['accuracy']
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"]
     )
 
     model.summary()
 
     cb_list = [
-        callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True),
-        callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=4, verbose=1)
+        callbacks.EarlyStopping(
+            monitor="val_loss",
+            patience=10,
+            restore_best_weights=True
+        ),
+        callbacks.ReduceLROnPlateau(
+            monitor="val_loss",
+            factor=0.5,
+            patience=4,
+            verbose=1
+        )
     ]
 
     print("Starting training...")
+
     model.fit(
-        X_train, y_train,
+        X_train,
+        y_train,
         epochs=60,
         batch_size=32,
         validation_data=(X_test, y_test),
@@ -99,6 +174,7 @@ if __name__ == "__main__":
     )
 
     print("Evaluating model...")
+
     y_pred_probs = model.predict(X_test)
     y_pred = np.argmax(y_pred_probs, axis=-1)
 
@@ -109,4 +185,5 @@ if __name__ == "__main__":
     print(confusion_matrix(y_test, y_pred))
 
     model.save(MODEL_SAVE_PATH)
+
     print(f"Model saved to '{MODEL_SAVE_PATH}'.")
